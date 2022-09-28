@@ -52,30 +52,16 @@ contract('MasterChef', ([alice, bob, market, safu, treasure, minter]) => {
       await chef.add('2000', lp1.address, true, { from: minter });
       await chef.add('1000', lp2.address, true, { from: minter });
       await chef.add('500', lp3.address, true, { from: minter });
-      await chef.add('500', lp3.address, true, { from: minter });
-      await chef.add('500', lp3.address, true, { from: minter });
-      await chef.add('500', lp3.address, true, { from: minter });
-      await chef.add('500', lp3.address, true, { from: minter });
-      await chef.add('100', lp3.address, true, { from: minter });
-      await chef.add('100', lp3.address, true, { from: minter });
 
-      assert.equal((await chef.poolLength()).toString(), "10");
+      assert.equal((await chef.poolLength()).toString(), "3");
 
       await time.advanceBlockTo('170');
 
       await lp1.approve(chef.address, '1000', { from: alice });
       assert.equal((await sevn.balanceOf(alice)).toString(), '0');
-      await chef.deposit(1, '20', { from: alice });
-      await chef.withdraw(1, '20', { from: alice });
-      assert.equal((await sevn.balanceOf(alice)).toString(), '236');
-
-      await sevn.approve(chef.address, '1000', { from: alice });
-      await chef.enterStaking('20', { from: alice });
-      await chef.enterStaking('0', { from: alice });
-      await chef.enterStaking('0', { from: alice });
-      await chef.enterStaking('0', { from: alice });
-      assert.equal((await sevn.balanceOf(alice)).toString(), '570');
-
+      await chef.deposit(0, '20', { from: alice });
+      await chef.withdraw(0, '20', { from: alice });
+      assert.equal((await sevn.balanceOf(alice)).toString(), '452');
     })
 
 
@@ -85,44 +71,23 @@ contract('MasterChef', ([alice, bob, market, safu, treasure, minter]) => {
         await chef.add("1000", lp3.address, true, { from: minter });
     
         await lp1.approve(chef.address, "100", { from: alice });
-        await chef.deposit(1, "20", { from: alice });
-        await chef.deposit(1, "0", { from: alice });
-        await chef.deposit(1, "40", { from: alice });
-        await chef.deposit(1, "0", { from: alice });
+        await chef.deposit(0, "20", { from: alice });
+        await chef.deposit(0, "0", { from: alice });
+        await chef.deposit(0, "40", { from: alice });
+        await chef.deposit(0, "0", { from: alice });
         assert.equal((await lp1.balanceOf(alice)).toString(), "1940");
-        await chef.withdraw(1, "10", { from: alice });
+        await chef.withdraw(0, "10", { from: alice });
         assert.equal((await lp1.balanceOf(alice)).toString(), "1950");
-        assert.equal((await sevn.balanceOf(alice)).toString(), "792");
+        assert.equal((await sevn.balanceOf(alice)).toString(), "1056");
     
         await lp1.approve(chef.address, "100", { from: bob });
         assert.equal((await lp1.balanceOf(bob)).toString(), "2000");
-        await chef.deposit(1, "50", { from: bob });
+        await chef.deposit(0, "50", { from: bob });
         assert.equal((await lp1.balanceOf(bob)).toString(), "1950");
-        await chef.deposit(1, "0", { from: bob });
-        assert.equal((await sevn.balanceOf(bob)).toString(), "99");
-        await chef.emergencyWithdraw(1, { from: bob });
+        await chef.deposit(0, "0", { from: bob });
+        assert.equal((await sevn.balanceOf(bob)).toString(), "132");
+        await chef.emergencyWithdraw(0, { from: bob });
         assert.equal((await lp1.balanceOf(bob)).toString(), "2000");
-      });
-
-
-      it("staking/unstaking", async () => {
-        await chef.add("1000", lp1.address, true, { from: minter });
-        await chef.add("1000", lp2.address, true, { from: minter });
-        await chef.add("1000", lp3.address, true, { from: minter });
-    
-        await lp1.approve(chef.address, "10", { from: alice });
-        await chef.deposit(1, "2", { from: alice }); //0
-        await chef.withdraw(1, "2", { from: alice }); //1
-    
-        console.log((await sevn.balanceOf(alice)).toString());
-
-        await sevn.approve(chef.address, "250", { from: alice });
-        await chef.enterStaking("188", { from: alice }); //3
-        assert.equal((await sevn.balanceOf(alice)).toString(), "10");
-        await chef.enterStaking("10", { from: alice }); //4
-        assert.equal((await sevn.balanceOf(alice)).toString(), "197");
-        await chef.leaveStaking(198);
-        assert.equal((await sevn.balanceOf(alice)).toString(), "593");
       });
 
       it("updaate multiplier", async () => {
@@ -132,40 +97,33 @@ contract('MasterChef', ([alice, bob, market, safu, treasure, minter]) => {
     
         await lp1.approve(chef.address, "100", { from: alice });
         await lp1.approve(chef.address, "100", { from: bob });
-        await chef.deposit(1, "100", { from: alice });
-        await chef.deposit(1, "100", { from: bob });
-        await chef.deposit(1, "0", { from: alice });
-        await chef.deposit(1, "0", { from: bob });
+        await chef.deposit(0, "100", { from: alice });
+        await chef.deposit(0, "100", { from: bob });
+        await chef.deposit(0, "0", { from: alice });
+        await chef.deposit(0, "0", { from: bob });
     
         await sevn.approve(chef.address, "100", { from: alice });
         await sevn.approve(chef.address, "100", { from: bob });
-        await chef.enterStaking("50", { from: alice });
-        await chef.enterStaking("100", { from: bob });
     
         await chef.updateMultiplier("0", { from: minter });
     
-        await chef.enterStaking("0", { from: alice });
-        await chef.enterStaking("0", { from: bob });
-        await chef.deposit(1, "0", { from: alice });
-        await chef.deposit(1, "0", { from: bob });
+        await chef.deposit(0, "0", { from: alice });
+        await chef.deposit(0, "0", { from: bob });
     
-        assert.equal((await sevn.balanceOf(alice)).toString(), "544");
-        assert.equal((await sevn.balanceOf(bob)).toString(), "98");
+        assert.equal((await sevn.balanceOf(alice)).toString(), "528");
+        assert.equal((await sevn.balanceOf(bob)).toString(), "264");
     
         await time.advanceBlockTo("265");
     
-        await chef.enterStaking("0", { from: alice });
-        await chef.enterStaking("0", { from: bob });
-        await chef.deposit(1, "0", { from: alice });
-        await chef.deposit(1, "0", { from: bob });
+
+        await chef.deposit(0, "0", { from: alice });
+        await chef.deposit(0, "0", { from: bob });
     
-        assert.equal((await sevn.balanceOf(alice)).toString(), "544");
-        assert.equal((await sevn.balanceOf(bob)).toString(), "98");
+        assert.equal((await sevn.balanceOf(alice)).toString(), "528");
+        assert.equal((await sevn.balanceOf(bob)).toString(), "264");
     
-        await chef.leaveStaking("50", { from: alice });
-        await chef.leaveStaking("100", { from: bob });
-        await chef.withdraw(1, "100", { from: alice });
-        await chef.withdraw(1, "100", { from: bob });
+        await chef.withdraw(0, "100", { from: alice });
+        await chef.withdraw(0, "100", { from: bob });
       });
 
 });

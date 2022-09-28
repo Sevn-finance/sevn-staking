@@ -4,6 +4,7 @@ pragma solidity 0.8.4;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
+import "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
@@ -21,6 +22,7 @@ import "./libs/Sevn.sol";
 contract MasterChef is Ownable {
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
+    using EnumerableSet for EnumerableSet.AddressSet;
 
     // Info of each user.
     struct UserInfo {
@@ -49,7 +51,7 @@ contract MasterChef is Ownable {
     Sevn immutable public SEVN;
     //Pools, Farms, Market, Safu percent decimals
     uint256 immutable public percentDec = 1000000;
-    //Pools and Farms percent from token per block
+    //Farms percent from token per block
     uint256 immutable public stakingPercent;
     //Developers percent from token per block
     uint256 immutable public marketPercent;
@@ -76,6 +78,8 @@ contract MasterChef is Ownable {
     IMigratorChef public migrator;
     // Info of each pool.
     PoolInfo[] public poolInfo;
+    // Set of all LP tokens that have been added as pools
+    EnumerableSet.AddressSet private lpTokens;
     // Info of each user that stakes LP tokens.
     mapping(uint256 => mapping(address => UserInfo)) public userInfo;
     
@@ -83,16 +87,17 @@ contract MasterChef is Ownable {
     uint256 public totalAllocPoint = 0;
     // The block number when SEVN mining starts.
     uint256 public startBlock;
-    // Deposited amount SEVN in MasterChef
-    uint256 public depositedSevn;
 
     event Deposit(address indexed user, uint256 indexed pid, uint256 amount);
     event Withdraw(address indexed user, uint256 indexed pid, uint256 amount);
+    event Harvest(address indexed user, uint256 indexed pid, uint256 amount);
     event EmergencyWithdraw(
         address indexed user,
         uint256 indexed pid,
         uint256 amount
     );
+    event UpdateEmissionRate(address indexed user, uint256 _joePerSec);
+
 
     constructor( 
         Sevn _SEVN,
@@ -117,28 +122,18 @@ contract MasterChef is Ownable {
         safuPercent = _safuPercent;
         treasurePercent = _treasurePercent;
         lastBlockMarketWithdraw = _startBlock;
-          
-        // staking pool
-        poolInfo.push(PoolInfo({
-            lpToken: _SEVN,
-            allocPoint: 1000,
-            lastRewardBlock: startBlock,
-            accSEVNPerShare: 0
-        }));
-
-        totalAllocPoint = 1000;
-
-    }
-
-    function updateMultiplier(uint256 multiplierNumber) public onlyOwner {
-        BONUS_MULTIPLIER = multiplierNumber;
+        totalAllocPoint = 0;
     }
 
     function poolLength() external view returns (uint256) {
         return poolInfo.length;
     }
 
-    function withdrawDevAndMarketFee() public {
+    function updateMultiplier(uint256 multiplierNumber) external onlyOwner {
+        BONUS_MULTIPLIER = multiplierNumber;
+    }
+
+    function withdrawDevAndMarketFee() external {
         require(lastBlockMarketWithdraw < block.number, 'wait for new block');
         uint256 multiplier = getMultiplier(lastBlockMarketWithdraw, block.number);
         uint256 SEVNReward = multiplier.mul(SEVNPerBlock);
@@ -150,7 +145,9 @@ contract MasterChef is Ownable {
 
     // Add a new lp to the pool. Can only be called by the owner.
     // XXX DO NOT add the same LP token more than once. Rewards will be messed up if you do.
-    function add( uint256 _allocPoint, IERC20 _lpToken, bool _withUpdate ) public onlyOwner {
+    function add( uint256 _allocPoint, IERC20 _lpToken, bool _withUpdate ) external onlyOwner {
+        require(!lpTokens.contains(address(_lpToken)), "add: LP already added");
+
         if (_withUpdate) {
             massUpdatePools();
         }
@@ -164,10 +161,12 @@ contract MasterChef is Ownable {
                 accSEVNPerShare: 0
             })
         );
+
+        lpTokens.add(address(_lpToken));
     }
 
     // Update the given pool's SEVN allocation point. Can only be called by the owner.
-    function set( uint256 _pid, uint256 _allocPoint, bool _withUpdate) public onlyOwner {
+    function set( uint256 _pid, uint256 _allocPoint, bool _withUpdate) external onlyOwner {
         if (_withUpdate) {
             massUpdatePools();
         }
@@ -176,12 +175,12 @@ contract MasterChef is Ownable {
     }
 
     // Set the migrator contract. Can only be called by the owner.
-    function setMigrator(IMigratorChef _migrator) public onlyOwner {
+    function setMigrator(IMigratorChef _migrator) external onlyOwner {
         migrator = _migrator;
     }
 
     // Migrate lp token to another lp contract. Can be called by anyone. We trust that migrator contract is good.
-    function migrate(uint256 _pid) public {
+    function migrate(uint256 _pid) external {
         require(address(migrator) != address(0), "migrate: no migrator");
         PoolInfo storage pool = poolInfo[_pid];
         IERC20 lpToken = pool.lpToken;
@@ -203,9 +202,7 @@ contract MasterChef is Ownable {
         UserInfo storage user = userInfo[_pid][_user];
         uint256 accSEVNPerShare = pool.accSEVNPerShare;
         uint256 lpSupply = pool.lpToken.balanceOf(address(this));
-        if (_pid == 0){
-            lpSupply = depositedSevn;
-        }
+
         if (block.number > pool.lastRewardBlock && lpSupply != 0) {
             uint256 multiplier = getMultiplier(pool.lastRewardBlock, block.number);
             uint256 SEVNReward = multiplier.mul(SEVNPerBlock).mul(pool.allocPoint).div(totalAllocPoint).mul(stakingPercent).div(percentDec);
@@ -229,31 +226,29 @@ contract MasterChef is Ownable {
             return;
         }
         uint256 lpSupply = pool.lpToken.balanceOf(address(this));
-        if (_pid == 0){
-            lpSupply = depositedSevn;
-        }
+
         if (lpSupply <= 0) {
             pool.lastRewardBlock = block.number;
             return;
         }
         uint256 multiplier = getMultiplier(pool.lastRewardBlock, block.number);
         uint256 SEVNReward = multiplier.mul(SEVNPerBlock).mul(pool.allocPoint).div(totalAllocPoint).mul(stakingPercent).div(percentDec);
+        
         SEVN.mint(address(this), SEVNReward);
         pool.accSEVNPerShare = pool.accSEVNPerShare.add(SEVNReward.mul(1e12).div(lpSupply));
         pool.lastRewardBlock = block.number;
     }
 
     // Deposit LP tokens to MasterChef for SEVN allocation.
-    function deposit(uint256 _pid, uint256 _amount) public {
-
-        require (_pid != 0, 'deposit SEVN by staking');
-
+    function deposit(uint256 _pid, uint256 _amount) external {
         PoolInfo storage pool = poolInfo[_pid];
         UserInfo storage user = userInfo[_pid][msg.sender];
         updatePool(_pid);
         if (user.amount > 0) {
+            // Harvest SEVN
             uint256 pending = user.amount.mul(pool.accSEVNPerShare).div(1e12).sub(user.rewardDebt);
             safeSEVNTransfer(msg.sender, pending);
+            emit Harvest(msg.sender, _pid, pending);
         }
         pool.lpToken.safeTransferFrom(address(msg.sender), address(this), _amount);
         user.amount = user.amount.add(_amount);
@@ -262,63 +257,25 @@ contract MasterChef is Ownable {
     }
 
     // Withdraw LP tokens from MasterChef.
-    function withdraw(uint256 _pid, uint256 _amount) public {
-
-        require (_pid != 0, 'withdraw SEVN by unstaking');
-
+    function withdraw(uint256 _pid, uint256 _amount) external {
         PoolInfo storage pool = poolInfo[_pid];
         UserInfo storage user = userInfo[_pid][msg.sender];
         require(user.amount >= _amount, "withdraw: not good");
+        
         updatePool(_pid);
+        
         uint256 pending = user.amount.mul(pool.accSEVNPerShare).div(1e12).sub(user.rewardDebt);
         safeSEVNTransfer(msg.sender, pending);
+        emit Harvest(msg.sender, _pid, pending);
+
         user.amount = user.amount.sub(_amount);
         user.rewardDebt = user.amount.mul(pool.accSEVNPerShare).div(1e12);
         pool.lpToken.safeTransfer(address(msg.sender), _amount);
         emit Withdraw(msg.sender, _pid, _amount);
     }
 
-    // Stake SEVN tokens to MasterChef
-    function enterStaking(uint256 _amount) public {
-        PoolInfo storage pool = poolInfo[0];
-        UserInfo storage user = userInfo[0][msg.sender];
-        updatePool(0);
-        if (user.amount > 0) {
-            uint256 pending = user.amount.mul(pool.accSEVNPerShare).div(1e12).sub(user.rewardDebt);
-            if(pending > 0) {
-                safeSEVNTransfer(msg.sender, pending);
-            }
-        }
-        if(_amount > 0) {
-            pool.lpToken.safeTransferFrom(address(msg.sender), address(this), _amount);
-            user.amount = user.amount.add(_amount);
-            depositedSevn = depositedSevn.add(_amount);
-        }
-        user.rewardDebt = user.amount.mul(pool.accSEVNPerShare).div(1e12);
-        emit Deposit(msg.sender, 0, _amount);
-    }
-
-    // Withdraw SEVN tokens from STAKING.
-    function leaveStaking(uint256 _amount) public {
-        PoolInfo storage pool = poolInfo[0];
-        UserInfo storage user = userInfo[0][msg.sender];
-        require(user.amount >= _amount, "withdraw: not good");
-        updatePool(0);
-        uint256 pending = user.amount.mul(pool.accSEVNPerShare).div(1e12).sub(user.rewardDebt);
-        if(pending > 0) {
-            safeSEVNTransfer(msg.sender, pending);
-        }
-        if(_amount > 0) {
-            user.amount = user.amount.sub(_amount);
-            pool.lpToken.safeTransfer(address(msg.sender), _amount);
-            depositedSevn = depositedSevn.sub(_amount);
-        }
-        user.rewardDebt = user.amount.mul(pool.accSEVNPerShare).div(1e12);
-        emit Withdraw(msg.sender, 0, _amount);
-    }
-
     // Withdraw without caring about rewards. EMERGENCY ONLY.
-    function emergencyWithdraw(uint256 _pid) public {
+    function emergencyWithdraw(uint256 _pid) external {
         PoolInfo storage pool = poolInfo[_pid];
         UserInfo storage user = userInfo[_pid][msg.sender];
         pool.lpToken.safeTransfer(address(msg.sender), user.amount);
@@ -337,18 +294,19 @@ contract MasterChef is Ownable {
         }
     }
 
-    function setMarketAddress(address _marketaddr) public onlyOwner {
+    function setMarketAddress(address _marketaddr) external onlyOwner {
         marketaddr = _marketaddr;
     }
-    function setTreasureAddress(address _treasureaddr) public onlyOwner {
+    function setTreasureAddress(address _treasureaddr) external onlyOwner {
         treasureaddr = _treasureaddr;
     }
-    function setSafuAddress(address _safuaddr) public onlyOwner{
+    function setSafuAddress(address _safuaddr) external onlyOwner{
         safuaddr = _safuaddr;
     }
-    function updateSEVNPerBlock(uint256 newAmount) public onlyOwner {
+    function updateSEVNPerBlock(uint256 newAmount) external onlyOwner {
         require(newAmount <= 60 * 1e18, 'Max per block 60 SEVN');
         require(newAmount >= 1 * 1e18, 'Min per block 1 SEVN');
         SEVNPerBlock = newAmount;
+        emit UpdateEmissionRate(msg.sender, newAmount);
     }
 }
